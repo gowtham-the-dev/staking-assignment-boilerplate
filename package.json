@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "format": "prettier --write \"app/**/*.{ts,tsx}\" \"scripts/**/*.ts\"",
+    "format": "prettier --write \"app/**/*.{ts,tsx}\" \"components/**/*.{ts,tsx}\" \"hooks/**/*.ts\" \"lib/**/*.ts\" \"scripts/**/*.ts\"",
     "setup:wallet": "tsx scripts/setup-wallet.ts"
   },
   "dependencies": {
