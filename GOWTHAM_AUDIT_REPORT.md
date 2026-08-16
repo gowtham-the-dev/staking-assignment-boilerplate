@@ -1,7 +1,7 @@
 # Staking dApp — Audit & Implementation Report
 
 **Date:** August 2026  
-**Repository:** https://github.com/gowtham-the-dev/staking-assignment-boilerplate - Kindly share email to share access to the repo
+**Repository:** https://github.com/gowtham-the-dev/staking-assignment-boilerplate
 **Deployed Url for Testing:** https://tada-test-task-gowtham.netlify.app/
 
 ## 1. What the app does
@@ -137,6 +137,4 @@ For production/build verification:
 npm run lint
 npm run build
 ```
-
-Before submission, perform the available manual smoke tests on TADA. MVL staking remains unverified due to the unavailable faucet, while Sepolia should verify wallet connectivity and the expected “staking not available” state.
 
