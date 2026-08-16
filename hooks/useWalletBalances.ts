@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAccount, useChainId } from "wagmi";
+import { useChainId, useConnection } from "wagmi";
 import { getChainConfig } from "@/lib/config";
 import { erc20Abi } from "@/lib/contracts";
 import { createChainPublicClient, toReadErrorMessage } from "@/lib/publicClient";
 import { usePollCallback } from "./usePollCallback";
 
 export function useWalletBalances() {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useConnection();
   const chainId = useChainId();
   const chain = getChainConfig(chainId);
 

@@ -51,5 +51,5 @@ export function toFullPrecision(raw: bigint, decimals = DEFAULT_DECIMALS): strin
 /** Shorten an account: 0x1a2b…9f3c */
 export function shortAddress(account?: string): string {
   if (!account) return "";
-  return `${account.slice(0, 6)}…${account.slice(-4)}`;
+  return `${account.slice(0, 4)}…${account.slice(-2)}`;
 }

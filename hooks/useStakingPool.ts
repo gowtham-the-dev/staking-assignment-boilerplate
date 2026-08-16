@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Address } from "viem";
-import { useAccount, useChainId } from "wagmi";
+import { useChainId, useConnection } from "wagmi";
 import { getChainConfig, getStakingConfig } from "@/lib/config";
 import { erc20Abi, masterChefAbi } from "@/lib/contracts";
 import { createChainPublicClient, toReadErrorMessage } from "@/lib/publicClient";
 import { usePollCallback } from "./usePollCallback";
 
 export function useStakingPool(pid: number) {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useConnection();
   const chainId = useChainId();
   const chain = getChainConfig(chainId);
   const staking = getStakingConfig(chainId);

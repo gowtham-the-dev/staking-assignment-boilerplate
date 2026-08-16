@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import type { Address, Hex } from "viem";
-import { useAccount, useChainId, useWriteContract } from "wagmi";
+import { useChainId, useConnection, useWriteContract } from "wagmi";
 import { getChainConfig, isStakingSupported } from "@/lib/config";
 import { erc20Abi, masterChefAbi } from "@/lib/contracts";
 import { TX_ERROR_FALLBACK, toUserFacingError } from "@/lib/errors";
@@ -28,8 +28,8 @@ function requireStakingContext(
 export function useContractTx(onConfirmed?: () => void) {
   const chainId = useChainId();
   const chain = getChainConfig(chainId);
-  const { address } = useAccount();
-  const { mutateAsync: writeContractAsync } = useWriteContract();
+  const { address } = useConnection();
+  const writeContract = useWriteContract();
 
   const [phase, setPhase] = useState<TxPhase>("idle");
   const [hash, setHash] = useState<string | null>(null);
@@ -80,14 +80,14 @@ export function useContractTx(onConfirmed?: () => void) {
       setMessage(labels.signing);
       setError(null);
 
-      const txHash = await writeContractAsync(params);
+      const txHash = await writeContract.mutateAsync(params);
       setHash(txHash);
       setPhase("confirming");
       setMessage(labels.confirming);
       await waitForReceipt(txHash);
       return txHash;
     },
-    [address, chain, chainId, waitForReceipt, writeContractAsync],
+    [address, chain, chainId, waitForReceipt, writeContract.mutateAsync],
   );
 
   const handleFailure = useCallback((err: unknown) => {

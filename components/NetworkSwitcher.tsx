@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useAccount, useChainId, useSwitchChain } from "wagmi";
+import { useChainId, useConnection, useSwitchChain } from "wagmi";
 import { getChainConfig, SUPPORTED_CHAINS } from "@/lib/config";
 
 export function NetworkSwitcher() {
   const chainId = useChainId();
-  const { isConnected } = useAccount();
-  const { switchChain, isPending } = useSwitchChain();
+  const { isConnected } = useConnection();
+  const switchChain = useSwitchChain();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -29,7 +29,7 @@ export function NetworkSwitcher() {
     "chip",
     "net-pill",
     !supported ? "net-pill--warn" : "",
-    isPending ? "net-pill--busy" : "",
+    switchChain.isPending ? "net-pill--busy" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -42,11 +42,13 @@ export function NetworkSwitcher() {
         type="button"
         className={pillClass}
         onClick={() => isConnected && setOpen((v) => !v)}
-        disabled={!isConnected || isPending}
+        disabled={!isConnected || switchChain.isPending}
         aria-expanded={open}
         aria-haspopup="listbox"
       >
-        <span className="net-pill-name">{isPending ? "Switching…" : label}</span>
+        {supported && <span className="dot" />}
+        {!supported && chainId > 0 && <span className="dot dot-bad" />}
+        <span className="net-pill-name">{switchChain.isPending ? "Switching…" : label}</span>
         {isConnected && <span className="net-pill-caret">▾</span>}
       </button>
       {open && isConnected && (
@@ -60,7 +62,7 @@ export function NetworkSwitcher() {
               className={`net-dropdown-item${c.id === chainId ? " active" : ""}`}
               onClick={() => {
                 if (c.id !== chainId) {
-                  switchChain({ chainId: c.id });
+                  switchChain.mutate({ chainId: c.id });
                 }
                 setOpen(false);
               }}

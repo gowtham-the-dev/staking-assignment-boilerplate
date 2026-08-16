@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useAccount, useChainId } from "wagmi";
+import { useChainId, useConnection } from "wagmi";
 import { getChainConfig, getPoolConfig, isStakingSupported } from "@/lib/config";
 import { calculateApr } from "@/lib/apr";
 import { parseAmount } from "@/lib/format";
@@ -9,6 +9,7 @@ import { useWalletBalances } from "@/hooks/useWalletBalances";
 import { useStakingPool } from "@/hooks/useStakingPool";
 import { useContractTx } from "@/hooks/useContractTx";
 import { Header } from "@/components/Header";
+import { AppTabs } from "@/components/AppTabs";
 import { WalletTab } from "@/components/WalletTab";
 import { StakingTab } from "@/components/StakingTab";
 
@@ -20,7 +21,7 @@ export default function Home() {
   const [mode, setMode] = useState<"stake" | "unstake">("stake");
   const [amount, setAmount] = useState("");
 
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useConnection();
   const chainId = useChainId();
   const chain = getChainConfig(chainId);
   const stakingSupported = isStakingSupported(chainId);
@@ -73,18 +74,23 @@ export default function Home() {
   const pools = staking?.pools ?? [];
   const poolConfig = getPoolConfig(chainId, pid);
   const nativeDecimals = chain?.nativeDecimals ?? 18;
-  const depositDecimals =
+  const depositToken =
     chain?.tokens.find(
       (t) =>
         depositTokenAddr &&
         t.address.toLowerCase() === depositTokenAddr.toLowerCase(),
-    )?.decimals ?? 18;
-  const rewardDecimals =
+    ) ?? null;
+  const depositDecimals = depositToken?.decimals ?? 18;
+  const depositSymbol = depositToken?.symbol ?? "TOKEN";
+  const rewardToken =
     chain?.tokens.find(
       (t) =>
         staking?.rewardTokenAddress &&
         t.address.toLowerCase() === staking.rewardTokenAddress.toLowerCase(),
-    )?.decimals ?? 18;
+    ) ?? null;
+  const rewardDecimals = rewardToken?.decimals ?? 18;
+  const rewardSymbol = rewardToken?.symbol ?? nativeSymbol;
+  const poolLabel = poolConfig?.label ?? `Pool ${pid}`;
 
   const apr =
     mvlPerBlock !== undefined &&
@@ -156,26 +162,17 @@ export default function Home() {
     setAmount("");
   }
 
+  function handleTabChange(next: Tab) {
+    setTab(next);
+  }
+
   return (
     <div className="app">
-      <Header />
-
-      <nav className="tabs">
-        <button
-          type="button"
-          className={tab === "wallet" ? "active" : ""}
-          onClick={() => setTab("wallet")}
-        >
-          Wallet
-        </button>
-        <button
-          type="button"
-          className={tab === "staking" ? "active" : ""}
-          onClick={() => setTab("staking")}
-        >
-          Staking
-        </button>
-      </nav>
+      <Header
+        activeTab={tab}
+        onTabChange={handleTabChange}
+        stakingSupported={stakingSupported}
+      />
 
       <main>
         {tab === "wallet" ? (
@@ -189,6 +186,9 @@ export default function Home() {
             nativeDecimals={nativeDecimals}
             tokens={tokens}
             tokenBalances={tokenBalances}
+            networkName={networkName}
+            address={address}
+            explorerUrl={explorer}
           />
         ) : (
           <StakingTab
@@ -198,11 +198,14 @@ export default function Home() {
             pools={pools}
             pid={pid}
             onPidChange={setPid}
+            poolLabel={poolLabel}
             poolError={poolError}
             poolLoading={poolLoading}
             hasPoolData={mvlPerBlock !== undefined}
             pendingReward={pendingReward}
             rewardDecimals={rewardDecimals}
+            rewardSymbol={rewardSymbol}
+            depositSymbol={depositSymbol}
             apr={apr}
             canHarvest={canHarvest}
             isTxPending={isTxPending}
@@ -229,6 +232,13 @@ export default function Home() {
           />
         )}
       </main>
+
+      <AppTabs
+        activeTab={tab}
+        onTabChange={handleTabChange}
+        stakingSupported={stakingSupported}
+        className="mobile-tab-bar seg"
+      />
 
       <footer>
         {networkName} · Chain {chainId}
