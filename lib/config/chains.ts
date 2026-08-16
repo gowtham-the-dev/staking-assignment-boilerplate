@@ -1,4 +1,5 @@
 import type { Address } from "viem";
+import { getAddress, isAddress } from "viem";
 
 export type TokenConfig = {
   address: Address;
@@ -46,7 +47,12 @@ function envNumber(key: string, fallback: number): number {
 
 function envAddress(key: string, fallback: Address): Address {
   const raw = process.env[key];
-  return (raw as Address | undefined) ?? fallback;
+  if (raw === undefined || raw === "") return getAddress(fallback);
+  if (!isAddress(raw)) {
+    console.warn(`[config] Invalid address for ${key}: "${raw}". Using fallback.`);
+    return getAddress(fallback);
+  }
+  return getAddress(raw);
 }
 
 const TADA_A_MVL = envAddress(

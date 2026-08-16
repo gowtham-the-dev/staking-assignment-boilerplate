@@ -1,5 +1,6 @@
-import { createPublicClient, http, type Address, type PublicClient } from "viem";
+import { createPublicClient, http, type PublicClient } from "viem";
 import type { ChainDefinition } from "@/lib/config";
+import { READ_ERROR_FALLBACK, toUserFacingError } from "@/lib/errors";
 
 export function createChainPublicClient(chain: ChainDefinition): PublicClient {
   return createPublicClient({
@@ -18,6 +19,5 @@ export function createChainPublicClient(chain: ChainDefinition): PublicClient {
 }
 
 export function toReadErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message;
-  return "Failed to load on-chain data";
+  return toUserFacingError(error, READ_ERROR_FALLBACK);
 }

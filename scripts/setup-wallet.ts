@@ -13,6 +13,7 @@ import { createPublicClient, http, defineChain, formatEther, formatUnits } from 
 import { mvlChain, tadaChain } from "../lib/config/chains";
 
 const TADA_FAUCET_URL =
+  process.env.TADA_FAUCET_URL ??
   "https://vtghk6j2xleu2a2ohfkmp6mhra0nipse.lambda-url.ap-northeast-2.on.aws/";
 
 const erc20Abi = [

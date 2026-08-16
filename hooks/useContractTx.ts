@@ -1,9 +1,9 @@
 import { useCallback, useState } from "react";
 import type { Address, Hex } from "viem";
-import { maxUint256 } from "viem";
-import { useChainId, useWriteContract } from "wagmi";
-import { getChainConfig } from "@/lib/config";
+import { useAccount, useChainId, useWriteContract } from "wagmi";
+import { getChainConfig, isStakingSupported } from "@/lib/config";
 import { erc20Abi, masterChefAbi } from "@/lib/contracts";
+import { TX_ERROR_FALLBACK, toUserFacingError } from "@/lib/errors";
 import { createChainPublicClient } from "@/lib/publicClient";
 
 export type TxPhase = "idle" | "signing" | "confirming" | "success" | "error";
@@ -12,30 +12,23 @@ type WriteParams = Parameters<
   ReturnType<typeof useWriteContract>["mutateAsync"]
 >[0];
 
-function toTxErrorMessage(error: unknown): string {
-  const code = (error as { code?: number })?.code;
-  if (code === 4001) return "Transaction rejected in wallet";
-
-  if (error instanceof Error) {
-    const msg = error.message.toLowerCase();
-    if (msg.includes("user rejected") || msg.includes("user denied")) {
-      return "Transaction rejected in wallet";
-    }
-    if (msg.includes("insufficient funds")) {
-      return "Insufficient funds for gas";
-    }
-    if (msg.includes("reverted")) {
-      return "Transaction reverted on-chain";
-    }
-    return error.message;
+function requireStakingContext(
+  chainId: number,
+  chain: ReturnType<typeof getChainConfig>,
+  account: Address | undefined,
+): { chain: NonNullable<ReturnType<typeof getChainConfig>>; account: Address } {
+  if (!account) throw new Error("Wallet not connected");
+  if (!chain) throw new Error("Unsupported network");
+  if (!isStakingSupported(chainId)) {
+    throw new Error("Staking is not supported on this network");
   }
-
-  return "Transaction failed";
+  return { chain, account };
 }
 
 export function useContractTx(onConfirmed?: () => void) {
   const chainId = useChainId();
   const chain = getChainConfig(chainId);
+  const { address } = useAccount();
   const { mutateAsync: writeContractAsync } = useWriteContract();
 
   const [phase, setPhase] = useState<TxPhase>("idle");
@@ -72,6 +65,17 @@ export function useContractTx(onConfirmed?: () => void) {
       params: WriteParams,
       labels: { signing: string; confirming: string },
     ): Promise<string> => {
+      const { chain: activeChain, account } = requireStakingContext(chainId, chain, address);
+
+      const client = createChainPublicClient(activeChain);
+      await client.simulateContract({
+        address: params.address,
+        abi: params.abi,
+        functionName: params.functionName,
+        args: params.args,
+        account,
+      });
+
       setPhase("signing");
       setMessage(labels.signing);
       setError(null);
@@ -83,8 +87,16 @@ export function useContractTx(onConfirmed?: () => void) {
       await waitForReceipt(txHash);
       return txHash;
     },
-    [waitForReceipt, writeContractAsync],
+    [address, chain, chainId, waitForReceipt, writeContractAsync],
   );
+
+  const handleFailure = useCallback((err: unknown) => {
+    const errMsg = toUserFacingError(err, TX_ERROR_FALLBACK);
+    setPhase("error");
+    setError(errMsg);
+    setMessage(errMsg);
+    console.error(err);
+  }, []);
 
   const execute = useCallback(
     async (
@@ -104,15 +116,11 @@ export function useContractTx(onConfirmed?: () => void) {
         onConfirmed?.();
         return txHash;
       } catch (err) {
-        const errMsg = toTxErrorMessage(err);
-        setPhase("error");
-        setError(errMsg);
-        setMessage(errMsg);
-        console.error(err);
+        handleFailure(err);
         return undefined;
       }
     },
-    [isTxPending, onConfirmed, runWrite],
+    [handleFailure, isTxPending, onConfirmed, runWrite],
   );
 
   const stake = useCallback(
@@ -140,7 +148,7 @@ export function useContractTx(onConfirmed?: () => void) {
               address: depositTokenAddr,
               abi: erc20Abi,
               functionName: "approve",
-              args: [masterChefAddress, maxUint256],
+              args: [masterChefAddress, amount],
             },
             {
               signing: "Approve in wallet…",
@@ -168,15 +176,11 @@ export function useContractTx(onConfirmed?: () => void) {
         onConfirmed?.();
         return true;
       } catch (err) {
-        const errMsg = toTxErrorMessage(err);
-        setPhase("error");
-        setError(errMsg);
-        setMessage(errMsg);
-        console.error(err);
+        handleFailure(err);
         return false;
       }
     },
-    [isTxPending, onConfirmed, runWrite],
+    [handleFailure, isTxPending, onConfirmed, runWrite],
   );
 
   const withdraw = useCallback(
@@ -204,8 +208,12 @@ export function useContractTx(onConfirmed?: () => void) {
           args: [BigInt(pid), amount, recipient],
         },
         {
-          signing: withHarvest ? "Confirm withdraw + harvest in wallet…" : "Confirm withdraw in wallet…",
-          confirming: withHarvest ? "Confirming withdraw + harvest…" : "Confirming withdraw…",
+          signing: withHarvest
+            ? "Confirm withdraw + harvest in wallet…"
+            : "Confirm withdraw in wallet…",
+          confirming: withHarvest
+            ? "Confirming withdraw + harvest…"
+            : "Confirming withdraw…",
           success,
         },
       );

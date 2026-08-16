@@ -15,7 +15,7 @@ Three networks are supported:
 
 Switch networks from the header dropdown after connecting MetaMask.
 
-See [`AUDIT.md`](AUDIT.md) for the engineering audit, issues found, and intentional trade-offs.
+See [`AUDIT.md`](AUDIT.md) for the baseline engineering audit and [`CHANGES-IMPLEMENTED.md`](CHANGES-IMPLEMENTED.md) for what was built.
 
 ---
 
@@ -93,3 +93,4 @@ scripts/
 - Balances and pending rewards poll every 5s while connected.
 - TADA `setup:wallet` uses a hosted faucet; MVL has no automated faucet in this repo — fund manually.
 - Sepolia USDC uses 6 decimals; other tokens use 18.
+- Security: exact-amount ERC20 approvals, `simulateContract` before writes, sanitized errors, CSP headers. See [`CHANGES-IMPLEMENTED.md` §6](CHANGES-IMPLEMENTED.md#6-security-hardening).

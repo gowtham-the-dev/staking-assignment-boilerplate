@@ -158,7 +158,9 @@ export function useStakingPool(pid: number) {
   }, [address, chain, clearPoolState, isConnected, pid, staking]);
 
   useEffect(() => {
-    refetch();
+    // Initial fetch when pool/chain deps change; async setState is intentional.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refetch();
   }, [refetch]);
 
   const pollingEnabled = !!chain && !!staking;

@@ -61,7 +61,9 @@ export function useWalletBalances() {
   }, [address, chain, isConnected]);
 
   useEffect(() => {
-    refetch();
+    // Initial fetch when wallet/chain deps change; async setState is intentional.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refetch();
   }, [refetch]);
 
   usePollCallback(refetch, isConnected && !!address && !!chain);

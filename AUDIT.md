@@ -4,6 +4,8 @@
 **Scope:** Inherited Next.js staking dApp boilerplate (pre-hardening baseline)  
 **Auditor:** Take-home assignment review
 
+> Implementation details and fixes are documented separately in [`CHANGES-IMPLEMENTED.md`](CHANGES-IMPLEMENTED.md).
+
 ---
 
 ## 1. What the app does
@@ -17,7 +19,7 @@ This is a single-page **Next.js 16** dApp with two tabs:
 
 **Stack:** React 19, TypeScript, **wagmi v3** (connect + writes), **viem** (public client reads), **@tanstack/react-query** (provider only — reads do not use it).
 
-**Network (baseline):** TADA Protocol Testnet (chain ID `31451`) is hardwired for reads and staking. The assignment also targets **MVL Testnet** and **Ethereum Sepolia** (wallet-only); those are not wired in the starter.
+**Network (baseline):** TADA Protocol Testnet (chain ID `31451`) is hardwired for reads and staking.
 
 **Read pattern:** Manual `createPublicClient` + sequential `readContract` / `getBalance` calls in `app/page.tsx`. No Multicall3 (required for MVL Testnet compatibility).
 
@@ -25,7 +27,7 @@ This is a single-page **Next.js 16** dApp with two tabs:
 
 ---
 
-## 2. Current structure
+## 2. Current structure (baseline)
 
 ```
 app/
@@ -48,7 +50,7 @@ scripts/
 
 1. User connects via MetaMask (`injected({ target: "metaMask" })`).
 2. `useEffect` on connect/chain/pid change calls `loadWallet()` and `loadPool()`.
-3. A separate `setInterval` (5s) also calls those loaders — but with a stale closure bug (see below).
+3. A separate `setInterval` (5s) also calls those loaders — with a stale closure bug (see below).
 4. Staking actions call `writeContractAsync`; UI shows "submitted" on hash return without waiting for confirmation.
 
 ---
@@ -133,20 +135,20 @@ No Multicall3 / `multicall` / `readContracts` usage found. Sequential reads are 
 
 ---
 
-## 5. Planned fixes (by todo)
+## 5. Planned fixes (implementation roadmap)
 
-| Todo | Fixes |
-|------|-------|
-| `audit-report` | This document |
-| `chain-config` | Unified chain definitions (TADA, MVL, Sepolia); ABIs only in `contracts.ts` |
-| `providers-multi-chain` | Register all chains in wagmi; move `viem` to dependencies |
-| `hooks-reads` | C1, C2, C4, H5, M4, M5, M6, M8, L4 — chain-scoped reads, polling cleanup, race guards |
-| `hooks-tx` | C3, H6, M1, M7 — receipt wait, try/catch, approve sequencing, button states |
-| `format-precision` | H3, L1 — `parseUnits`, per-token decimals |
-| `apr-fix` | H1, H2, H4, M2 — allocPoint weighting, per-pool value units, window gating |
-| `ui-components` | Component split, network switcher, M3 display fixes |
-| `scripts-docs` | L2, L6, L7 — shared config in setup script, README, env docs |
-| `verify-build` | Build + smoke tests |
+| Area | Planned change |
+|------|----------------|
+| Config | Unified `lib/config/chains.ts` for TADA, MVL Testnet, Sepolia |
+| Providers | Register all chains in wagmi; move `viem` to dependencies |
+| Reads | Chain-scoped hooks with polling cleanup, race guards, loading/error UI |
+| Transactions | `useContractTx` with receipt wait, try/catch, approve sequencing |
+| Precision | `parseUnits`, per-token decimals (USDC = 6) |
+| APR | `allocPoint / totalAllocPoint`, per-pool value units, window gating |
+| UI | Component split, network switcher, formatted staked amounts |
+| Docs | README, `.env.example`, `setup-wallet.ts` for three networks |
+
+See [`CHANGES-IMPLEMENTED.md`](CHANGES-IMPLEMENTED.md) for what was actually delivered.
 
 ---
 
@@ -175,11 +177,11 @@ No Multicall3 / `multicall` / `readContracts` usage found. Sequential reads are 
 | TADA faucet (setup script) | AWS Lambda URL may change | Document failure in README; manual funding fallback |
 | MVL Testnet faucet | Not in starter script | Update setup script or document manual funding |
 
-If RPC or contracts become unavailable during review, reasonable mocking (static fixtures) is acceptable with trade-offs documented here.
+If RPC or contracts become unavailable during review, reasonable mocking (static fixtures) is acceptable with trade-offs documented in `CHANGES-IMPLEMENTED.md`.
 
 ---
 
-## 8. Target network matrix (post-implementation)
+## 8. Target network matrix (assignment scope)
 
 | Network | Chain ID | Wallet | Staking |
 |---------|----------|--------|---------|
@@ -189,4 +191,4 @@ If RPC or contracts become unavailable during review, reasonable mocking (static
 
 ---
 
-*This report reflects the codebase baseline before hardening. Sections 5 and 8 will be updated as fixes land.*
+*This report documents the inherited baseline and planned approach. It is intentionally preserved as a pre-implementation audit. See [`CHANGES-IMPLEMENTED.md`](CHANGES-IMPLEMENTED.md) for the post-hardening summary.*
