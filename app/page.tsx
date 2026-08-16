@@ -13,7 +13,7 @@ import {
   TADA_BLOCK_TIME_SECONDS,
 } from "@/lib/networks";
 import { getChainConfig, isStakingSupported } from "@/lib/config";
-import { formatAmount, parseAmount, toFullPrecision, shortAddress, toNumber } from "@/lib/format";
+import { formatAmount, parseAmount, toFullPrecision, shortAddress } from "@/lib/format";
 import { useWalletBalances } from "@/hooks/useWalletBalances";
 import { useStakingPool } from "@/hooks/useStakingPool";
 import { useContractTx } from "@/hooks/useContractTx";
@@ -90,8 +90,26 @@ export default function Home() {
     if (!Number.isFinite(apr)) apr = null;
   }
 
+  const masterChefAddress = staking?.masterChefAddress;
+  const explorer = chain?.explorerUrl ?? "";
+  const networkName = chain?.name ?? "Unknown network";
+  const pools = staking?.pools ?? [];
+  const nativeDecimals = chain?.nativeDecimals ?? 18;
+  const depositDecimals =
+    chain?.tokens.find(
+      (t) =>
+        depositTokenAddr &&
+        t.address.toLowerCase() === depositTokenAddr.toLowerCase(),
+    )?.decimals ?? 18;
+  const rewardDecimals =
+    chain?.tokens.find(
+      (t) =>
+        staking?.rewardTokenAddress &&
+        t.address.toLowerCase() === staking.rewardTokenAddress.toLowerCase(),
+    )?.decimals ?? 18;
+
   // ── form derived ────────────────────────────────────────────────────
-  const parsed = parseAmount(amount);
+  const parsed = parseAmount(amount, depositDecimals);
   const balanceForMode = mode === "stake" ? stakeWalletBalance : staked;
   const needsApprove =
     mode === "stake" && parsed !== undefined && allowance !== undefined && allowance < parsed;
@@ -105,11 +123,6 @@ export default function Home() {
   }
   const canAct = isConnected && parsed !== undefined && parsed > 0n && !validationMsg && !isTxPending;
   const canHarvest = isConnected && pendingReward !== undefined && pendingReward > 0n && !isTxPending;
-
-  const masterChefAddress = staking?.masterChefAddress;
-  const explorer = chain?.explorerUrl ?? "";
-  const networkName = chain?.name ?? "Unknown network";
-  const pools = staking?.pools ?? [];
 
   // ── actions ─────────────────────────────────────────────────────────
   async function handleStake() {
@@ -205,14 +218,14 @@ export default function Home() {
                 <div className="bal-block">
                   <div className="k">Native balance</div>
                   <div className="v big">
-                    {formatAmount(nativeBalance)} <small>{nativeSymbol}</small>
+                    {formatAmount(nativeBalance, nativeDecimals)} <small>{nativeSymbol}</small>
                   </div>
                 </div>
                 <div className="token-list">
                   {tokens.map((t, i) => (
                     <div className="token-row" key={t.address}>
                       <span className="token-sym">{t.symbol}</span>
-                      <span className="token-bal">{formatAmount(tokenBalances[i])}</span>
+                      <span className="token-bal">{formatAmount(tokenBalances[i], t.decimals)}</span>
                     </div>
                   ))}
                 </div>
@@ -258,7 +271,7 @@ export default function Home() {
                 <section className="hero">
                   <div className="reward">
                     <div className="label">Pending reward</div>
-                    <div className="big">{formatAmount(pendingReward)}</div>
+                    <div className="big">{formatAmount(pendingReward, rewardDecimals)}</div>
                   </div>
                   <div className="apr">
                     <div className="label">APR</div>
@@ -282,15 +295,15 @@ export default function Home() {
                 <div className="stats">
                   <div className="stat">
                     <div className="k">Wallet balance</div>
-                    <div className="v">{formatAmount(stakeWalletBalance)}</div>
+                    <div className="v">{formatAmount(stakeWalletBalance, depositDecimals)}</div>
                   </div>
                   <div className="stat">
                     <div className="k">Staked</div>
-                    <div className="v">{staked !== undefined ? staked.toString() : "—"}</div>
+                    <div className="v">{formatAmount(staked, depositDecimals)}</div>
                   </div>
                   <div className="stat">
-                    <div className="k">Total staked (raw)</div>
-                    <div className="v">{toNumber(totalStaked).toLocaleString()}</div>
+                    <div className="k">Total staked</div>
+                    <div className="v">{formatAmount(totalStaked, depositDecimals)}</div>
                   </div>
                 </div>
 
@@ -326,7 +339,10 @@ export default function Home() {
                     <button
                       className="max"
                       type="button"
-                      onClick={() => balanceForMode !== undefined && setAmount(toFullPrecision(balanceForMode))}
+                      onClick={() =>
+                        balanceForMode !== undefined &&
+                        setAmount(toFullPrecision(balanceForMode, depositDecimals))
+                      }
                     >
                       MAX
                     </button>
@@ -334,7 +350,7 @@ export default function Home() {
 
                   <div className="bal-hint">
                     <span>{mode === "stake" ? "Available to stake" : "Available to unstake"}</span>
-                    <span>{formatAmount(balanceForMode)}</span>
+                    <span>{formatAmount(balanceForMode, depositDecimals)}</span>
                   </div>
 
                   {validationMsg && <div className="validation">{validationMsg}</div>}
