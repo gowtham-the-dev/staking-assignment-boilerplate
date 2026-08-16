@@ -17,6 +17,3 @@ export const TADA_EXPLORER_URL = tadaChain.explorerUrl;
 export const TADA_MASTERCHEF_ADDRESS = tadaChain.staking!.masterChefAddress;
 export const TADA_BLOCK_TIME_SECONDS = tadaChain.blockTimeSeconds;
 export const TADA_TOKENS: TokenConfig[] = tadaChain.tokens;
-
-/** @deprecated Use per-pool depositTokenValueUnits from lib/config — kept for legacy page.tsx */
-export const APR_DEPOSIT_TOKEN_VALUE = 1;

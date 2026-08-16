@@ -8,17 +8,12 @@ import {
   useChainId,
 } from "wagmi";
 import { injected } from "wagmi/connectors";
-import {
-  APR_DEPOSIT_TOKEN_VALUE,
-  TADA_BLOCK_TIME_SECONDS,
-} from "@/lib/networks";
-import { getChainConfig, isStakingSupported } from "@/lib/config";
+import { getChainConfig, getPoolConfig, isStakingSupported } from "@/lib/config";
+import { calculateApr } from "@/lib/apr";
 import { formatAmount, parseAmount, toFullPrecision, shortAddress } from "@/lib/format";
 import { useWalletBalances } from "@/hooks/useWalletBalances";
 import { useStakingPool } from "@/hooks/useStakingPool";
 import { useContractTx } from "@/hooks/useContractTx";
-
-const SECONDS_PER_YEAR = 31_536_000;
 
 type Tab = "wallet" | "staking";
 
@@ -47,6 +42,8 @@ export default function Home() {
   const {
     staking,
     mvlPerBlock,
+    allocPoint,
+    totalAllocPoint,
     totalStaked,
     depositTokenAddr,
     staked,
@@ -79,21 +76,11 @@ export default function Home() {
   const [mode, setMode] = useState<"stake" | "unstake">("stake");
   const [amount, setAmount] = useState("");
 
-  // ── APR (legacy calc — apr-fix todo) ────────────────────────────────
-  let apr: number | null = null;
-  if (mvlPerBlock !== undefined && totalStaked !== undefined && totalStaked > 0n) {
-    const blockTime = chain?.blockTimeSeconds ?? TADA_BLOCK_TIME_SECONDS;
-    const blocksPerYear = SECONDS_PER_YEAR / blockTime;
-    const annual = Number(mvlPerBlock) * blocksPerYear;
-    const stakedValue = Number(totalStaked) * APR_DEPOSIT_TOKEN_VALUE;
-    apr = (annual / stakedValue) * 100;
-    if (!Number.isFinite(apr)) apr = null;
-  }
-
   const masterChefAddress = staking?.masterChefAddress;
   const explorer = chain?.explorerUrl ?? "";
   const networkName = chain?.name ?? "Unknown network";
   const pools = staking?.pools ?? [];
+  const poolConfig = getPoolConfig(chainId, pid);
   const nativeDecimals = chain?.nativeDecimals ?? 18;
   const depositDecimals =
     chain?.tokens.find(
@@ -107,6 +94,24 @@ export default function Home() {
         staking?.rewardTokenAddress &&
         t.address.toLowerCase() === staking.rewardTokenAddress.toLowerCase(),
     )?.decimals ?? 18;
+
+  const apr =
+    mvlPerBlock !== undefined &&
+    allocPoint !== undefined &&
+    totalAllocPoint !== undefined &&
+    totalStaked !== undefined &&
+    poolConfig &&
+    chain
+      ? calculateApr({
+          mvlPerBlock,
+          allocPoint,
+          totalAllocPoint,
+          totalStaked,
+          blockTimeSeconds: chain.blockTimeSeconds,
+          poolConfig,
+          windowActive,
+        })
+      : null;
 
   // ── form derived ────────────────────────────────────────────────────
   const parsed = parseAmount(amount, depositDecimals);
@@ -276,11 +281,7 @@ export default function Home() {
                   <div className="apr">
                     <div className="label">APR</div>
                     <div className="v">
-                      {pid === 1
-                        ? `${apr !== null ? apr.toFixed(2) : "0.00"}%`
-                        : apr !== null && windowActive
-                          ? `${apr.toFixed(2)}%`
-                          : "0.00%"}
+                      {apr !== null ? `${apr.toFixed(2)}%` : "0.00%"}
                     </div>
                   </div>
                   <button
