@@ -1,24 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import {
   useAccount,
   useConnect,
   useDisconnect,
   useChainId,
-  useWriteContract,
 } from "wagmi";
-import { maxUint256 } from "viem";
 import { injected } from "wagmi/connectors";
 import {
   APR_DEPOSIT_TOKEN_VALUE,
   TADA_BLOCK_TIME_SECONDS,
 } from "@/lib/networks";
 import { getChainConfig, isStakingSupported } from "@/lib/config";
-import { erc20Abi, masterChefAbi } from "@/lib/contracts";
 import { formatAmount, parseAmount, toFullPrecision, shortAddress, toNumber } from "@/lib/format";
 import { useWalletBalances } from "@/hooks/useWalletBalances";
 import { useStakingPool } from "@/hooks/useStakingPool";
+import { useContractTx } from "@/hooks/useContractTx";
 
 const SECONDS_PER_YEAR = 31_536_000;
 
@@ -31,7 +29,6 @@ export default function Home() {
   const { mutate: connect, isPending: connecting } = useConnect();
   const { mutate: disconnect } = useDisconnect();
   const chainId = useChainId();
-  const { mutateAsync: writeContractAsync } = useWriteContract();
 
   const chain = getChainConfig(chainId);
   const stakingSupported = isStakingSupported(chainId);
@@ -43,6 +40,7 @@ export default function Home() {
     nativeSymbol,
     isLoading: walletLoading,
     error: walletError,
+    refetch: refetchWallet,
   } = useWalletBalances();
 
   const [pid, setPid] = useState(0);
@@ -61,11 +59,25 @@ export default function Home() {
     refetch: refetchPool,
   } = useStakingPool(pid);
 
+  const onTxConfirmed = useCallback(() => {
+    refetchPool();
+    refetchWallet();
+  }, [refetchPool, refetchWallet]);
+
+  const {
+    phase: txPhase,
+    hash: txHash,
+    message: txMsg,
+    isTxPending,
+    reset: resetTx,
+    stake,
+    withdraw,
+    harvest,
+  } = useContractTx(onTxConfirmed);
+
   // form
   const [mode, setMode] = useState<"stake" | "unstake">("stake");
   const [amount, setAmount] = useState("");
-  const [txMsg, setTxMsg] = useState<string | null>(null);
-  const [txHash, setTxHash] = useState<string | null>(null);
 
   // ── APR (legacy calc — apr-fix todo) ────────────────────────────────
   let apr: number | null = null;
@@ -91,7 +103,8 @@ export default function Home() {
     else if (balanceForMode !== undefined && parsed > balanceForMode)
       validationMsg = mode === "stake" ? "Exceeds wallet balance" : "Exceeds staked amount";
   }
-  const canAct = isConnected && parsed !== undefined && parsed > 0n && !validationMsg;
+  const canAct = isConnected && parsed !== undefined && parsed > 0n && !validationMsg && !isTxPending;
+  const canHarvest = isConnected && pendingReward !== undefined && pendingReward > 0n && !isTxPending;
 
   const masterChefAddress = staking?.masterChefAddress;
   const explorer = chain?.explorerUrl ?? "";
@@ -101,53 +114,40 @@ export default function Home() {
   // ── actions ─────────────────────────────────────────────────────────
   async function handleStake() {
     if (parsed === undefined || !depositTokenAddr || !address || !masterChefAddress) return;
-    if (needsApprove) {
-      await writeContractAsync({
-        address: depositTokenAddr,
-        abi: erc20Abi,
-        functionName: "approve",
-        args: [masterChefAddress, maxUint256],
-      });
-    }
-    const hash = await writeContractAsync({
-      address: masterChefAddress,
-      abi: masterChefAbi,
-      functionName: "deposit",
-      args: [BigInt(pid), parsed, address],
+    const ok = await stake({
+      masterChefAddress,
+      depositTokenAddr,
+      pid,
+      amount: parsed,
+      recipient: address,
+      needsApprove,
     });
-    setTxHash(hash);
-    setTxMsg("Deposit submitted");
-    setAmount("");
-    refetchPool();
+    if (ok) setAmount("");
   }
 
   async function handleWithdraw(withHarvest: boolean) {
     if (parsed === undefined || !address || !masterChefAddress) return;
-    const fn = withHarvest ? "withdrawAndHarvest" : "withdraw";
-    const hash = await writeContractAsync({
-      address: masterChefAddress,
-      abi: masterChefAbi,
-      functionName: fn,
-      args: [BigInt(pid), parsed, address],
+    const ok = await withdraw({
+      masterChefAddress,
+      pid,
+      amount: parsed,
+      recipient: address,
+      withHarvest,
     });
-    setTxHash(hash);
-    setTxMsg(withHarvest ? "Withdraw + harvest submitted" : "Withdraw submitted");
-    setAmount("");
-    refetchPool();
+    if (ok) setAmount("");
   }
 
   async function handleHarvest() {
     if (!address || !masterChefAddress) return;
-    const hash = await writeContractAsync({
-      address: masterChefAddress,
-      abi: masterChefAbi,
-      functionName: "harvest",
-      args: [BigInt(pid), address],
+    await harvest({
+      masterChefAddress,
+      pid,
+      recipient: address,
     });
-    setTxHash(hash);
-    setTxMsg("Harvest submitted");
-    refetchPool();
   }
+
+  const txBannerClass =
+    txPhase === "error" ? "tx tx-err" : txPhase === "success" ? "tx tx-ok" : "tx tx-info";
 
   // ── render ──────────────────────────────────────────────────────────
   return (
@@ -270,8 +270,12 @@ export default function Home() {
                           : "0.00%"}
                     </div>
                   </div>
-                  <button className="btn btn-claim" onClick={handleHarvest}>
-                    Harvest
+                  <button
+                    className="btn btn-claim"
+                    onClick={handleHarvest}
+                    disabled={!canHarvest}
+                  >
+                    {isTxPending ? "Processing…" : "Harvest"}
                   </button>
                 </section>
 
@@ -336,8 +340,16 @@ export default function Home() {
                   {validationMsg && <div className="validation">{validationMsg}</div>}
 
                   {mode === "stake" ? (
-                    <button className="btn btn-primary" onClick={handleStake} disabled={!canAct}>
-                      {needsApprove ? "Approve & Stake" : "Stake"}
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleStake}
+                      disabled={!canAct}
+                    >
+                      {isTxPending
+                        ? "Processing…"
+                        : needsApprove
+                          ? "Approve & Stake"
+                          : "Stake"}
                     </button>
                   ) : (
                     <div className="btn-row">
@@ -346,28 +358,28 @@ export default function Home() {
                         onClick={() => handleWithdraw(false)}
                         disabled={!canAct}
                       >
-                        Withdraw
+                        {isTxPending ? "Processing…" : "Withdraw"}
                       </button>
                       <button
                         className="btn btn-primary"
                         onClick={() => handleWithdraw(true)}
                         disabled={!canAct}
                       >
-                        Withdraw + harvest
+                        {isTxPending ? "Processing…" : "Withdraw + harvest"}
                       </button>
                     </div>
                   )}
                 </section>
 
                 {txMsg && (
-                  <div className="tx tx-info">
+                  <div className={txBannerClass}>
                     <span className="tx-msg">{txMsg}</span>
                     {txHash && explorer && (
                       <a className="tx-link" href={`${explorer}/tx/${txHash}`} target="_blank" rel="noreferrer">
                         View
                       </a>
                     )}
-                    <button className="tx-x" onClick={() => { setTxMsg(null); setTxHash(null); }}>
+                    <button className="tx-x" onClick={resetTx}>
                       ✕
                     </button>
                   </div>
