@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   useAccount,
   useConnect,
@@ -8,39 +8,21 @@ import {
   useChainId,
   useWriteContract,
 } from "wagmi";
-import { createPublicClient, http, maxUint256 } from "viem";
+import { maxUint256 } from "viem";
 import { injected } from "wagmi/connectors";
 import {
   APR_DEPOSIT_TOKEN_VALUE,
   TADA_BLOCK_TIME_SECONDS,
-  TADA_CHAIN_ID,
-  TADA_EXPLORER_URL,
-  TADA_MASTERCHEF_ADDRESS,
-  TADA_NATIVE_SYMBOL,
-  TADA_NETWORK_NAME,
-  TADA_RPC_URL,
-  TADA_TOKENS,
 } from "@/lib/networks";
+import { getChainConfig, isStakingSupported } from "@/lib/config";
 import { erc20Abi, masterChefAbi } from "@/lib/contracts";
 import { formatAmount, parseAmount, toFullPrecision, shortAddress, toNumber } from "@/lib/format";
+import { useWalletBalances } from "@/hooks/useWalletBalances";
+import { useStakingPool } from "@/hooks/useStakingPool";
 
 const SECONDS_PER_YEAR = 31_536_000;
-const POLL_MS = 5000;
 
 type Tab = "wallet" | "staking";
-
-// Public client for reads (no wallet needed). Hardwired to TADA.
-function publicClientFor() {
-  return createPublicClient({
-    chain: {
-      id: TADA_CHAIN_ID,
-      name: TADA_NETWORK_NAME,
-      nativeCurrency: { name: TADA_NATIVE_SYMBOL, symbol: TADA_NATIVE_SYMBOL, decimals: 18 },
-      rpcUrls: { default: { http: [TADA_RPC_URL] } },
-    },
-    transport: http(TADA_RPC_URL),
-  });
-}
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>("wallet");
@@ -51,22 +33,33 @@ export default function Home() {
   const chainId = useChainId();
   const { mutateAsync: writeContractAsync } = useWriteContract();
 
-  // ── Wallet tab state ────────────────────────────────────────────────
-  const [nativeBalance, setNativeBalance] = useState<bigint | undefined>(undefined);
-  const [tokenBalances, setTokenBalances] = useState<(bigint | undefined)[]>([]);
+  const chain = getChainConfig(chainId);
+  const stakingSupported = isStakingSupported(chainId);
 
-  // ── Staking tab state ───────────────────────────────────────────────
+  const {
+    nativeBalance,
+    tokenBalances,
+    tokens,
+    nativeSymbol,
+    isLoading: walletLoading,
+    error: walletError,
+  } = useWalletBalances();
+
   const [pid, setPid] = useState(0);
-  const [mvlPerBlock, setMvlPerBlock] = useState<bigint | undefined>(undefined);
-  const [startBlock, setStartBlock] = useState<bigint | undefined>(undefined);
-  const [endBlock, setEndBlock] = useState<bigint | undefined>(undefined);
-  const [currentBlock, setCurrentBlock] = useState<bigint | undefined>(undefined);
-  const [totalStaked, setTotalStaked] = useState<bigint | undefined>(undefined);
-  const [depositTokenAddr, setDepositTokenAddr] = useState<`0x${string}` | undefined>(undefined);
-  const [staked, setStaked] = useState<bigint | undefined>(undefined);
-  const [stakeWalletBalance, setStakeWalletBalance] = useState<bigint | undefined>(undefined);
-  const [allowance, setAllowance] = useState<bigint | undefined>(undefined);
-  const [pendingReward, setPendingReward] = useState<bigint | undefined>(undefined);
+  const {
+    staking,
+    mvlPerBlock,
+    totalStaked,
+    depositTokenAddr,
+    staked,
+    stakeWalletBalance,
+    allowance,
+    pendingReward,
+    windowActive,
+    isLoading: poolLoading,
+    error: poolError,
+    refetch: refetchPool,
+  } = useStakingPool(pid);
 
   // form
   const [mode, setMode] = useState<"stake" | "unstake">("stake");
@@ -74,147 +67,16 @@ export default function Home() {
   const [txMsg, setTxMsg] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
 
-  // ── Wallet balances via individual reads ────────────────────────────
-  async function loadWallet() {
-    if (!address) return;
-    try {
-      const client = publicClientFor();
-      const tokens = TADA_TOKENS;
-      const native = await client.getBalance({ address });
-      const results: bigint[] = [];
-      for (const t of tokens) {
-        const bal = await client.readContract({
-          address: t.address,
-          abi: erc20Abi,
-          functionName: "balanceOf",
-          args: [address],
-        }) as bigint;
-        results.push(bal);
-      }
-      setNativeBalance(native);
-      setTokenBalances(results);
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  // ── Pool + user data via individual reads ───────────────────────────
-  async function loadPool() {
-    const chef = TADA_MASTERCHEF_ADDRESS;
-    try {
-      const client = publicClientFor();
-      const base = { address: chef, abi: masterChefAbi } as const;
-      const block = await client.getBlockNumber();
-
-      const poolInfo = await client.readContract({
-        ...base,
-        functionName: "poolInfo",
-        args: [BigInt(pid)],
-      }) as readonly [`0x${string}`, bigint, bigint, bigint];
-
-      const perBlock = await client.readContract({
-        ...base,
-        functionName: "mvlPerBlock",
-      }) as bigint;
-
-      const sBlock = await client.readContract({
-        ...base,
-        functionName: "startBlock",
-      }) as bigint;
-
-      const eBlock = await client.readContract({
-        ...base,
-        functionName: "endBlock",
-      }) as bigint;
-
-      const lpToken = poolInfo[0];
-
-      const totStaked = await client.readContract({
-        address: lpToken,
-        abi: erc20Abi,
-        functionName: "balanceOf",
-        args: [chef],
-      }) as bigint;
-
-      setDepositTokenAddr(lpToken);
-      setMvlPerBlock(perBlock);
-      setStartBlock(sBlock);
-      setEndBlock(eBlock);
-      setCurrentBlock(block);
-      setTotalStaked(totStaked);
-
-      if (address) {
-        const userInfo = await client.readContract({
-          ...base,
-          functionName: "userInfo",
-          args: [BigInt(pid), address],
-        }) as readonly [bigint, bigint];
-
-        const bal = await client.readContract({
-          address: lpToken,
-          abi: erc20Abi,
-          functionName: "balanceOf",
-          args: [address],
-        }) as bigint;
-
-        const allow = await client.readContract({
-          address: lpToken,
-          abi: erc20Abi,
-          functionName: "allowance",
-          args: [address, chef],
-        }) as bigint;
-
-        const pending = await client.readContract({
-          ...base,
-          functionName: "pendingMvl",
-          args: [BigInt(pid), address],
-        }) as bigint;
-
-        setStaked(userInfo[0]);
-        setStakeWalletBalance(bal);
-        setAllowance(allow);
-        setPendingReward(pending);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  // Load on connect / chain change / pool change.
-  useEffect(() => {
-    if (isConnected) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      loadWallet();
-      loadPool();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, chainId, pid]);
-
-  // Keep rewards/balances live with a manual poll.
-  useEffect(() => {
-    setInterval(() => {
-      loadWallet();
-      loadPool();
-    }, POLL_MS);
-    // no cleanup — interval keeps refreshing
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ── APR ─────────────────────────────────────────────────────────────
+  // ── APR (legacy calc — apr-fix todo) ────────────────────────────────
   let apr: number | null = null;
   if (mvlPerBlock !== undefined && totalStaked !== undefined && totalStaked > 0n) {
-    const blocksPerYear = SECONDS_PER_YEAR / TADA_BLOCK_TIME_SECONDS;
+    const blockTime = chain?.blockTimeSeconds ?? TADA_BLOCK_TIME_SECONDS;
+    const blocksPerYear = SECONDS_PER_YEAR / blockTime;
     const annual = Number(mvlPerBlock) * blocksPerYear;
     const stakedValue = Number(totalStaked) * APR_DEPOSIT_TOKEN_VALUE;
     apr = (annual / stakedValue) * 100;
     if (!Number.isFinite(apr)) apr = null;
   }
-  const windowActive =
-    currentBlock !== undefined &&
-    startBlock !== undefined &&
-    endBlock !== undefined &&
-    currentBlock >= startBlock &&
-    currentBlock < endBlock;
 
   // ── form derived ────────────────────────────────────────────────────
   const parsed = parseAmount(amount);
@@ -231,21 +93,24 @@ export default function Home() {
   }
   const canAct = isConnected && parsed !== undefined && parsed > 0n && !validationMsg;
 
+  const masterChefAddress = staking?.masterChefAddress;
+  const explorer = chain?.explorerUrl ?? "";
+  const networkName = chain?.name ?? "Unknown network";
+  const pools = staking?.pools ?? [];
+
   // ── actions ─────────────────────────────────────────────────────────
   async function handleStake() {
-    const chef = TADA_MASTERCHEF_ADDRESS;
-    if (parsed === undefined || !depositTokenAddr || !address) return;
-    // approve first if needed, then deposit right after
+    if (parsed === undefined || !depositTokenAddr || !address || !masterChefAddress) return;
     if (needsApprove) {
       await writeContractAsync({
         address: depositTokenAddr,
         abi: erc20Abi,
         functionName: "approve",
-        args: [chef, maxUint256],
+        args: [masterChefAddress, maxUint256],
       });
     }
     const hash = await writeContractAsync({
-      address: chef,
+      address: masterChefAddress,
       abi: masterChefAbi,
       functionName: "deposit",
       args: [BigInt(pid), parsed, address],
@@ -253,15 +118,14 @@ export default function Home() {
     setTxHash(hash);
     setTxMsg("Deposit submitted");
     setAmount("");
-    loadPool();
+    refetchPool();
   }
 
   async function handleWithdraw(withHarvest: boolean) {
-    const chef = TADA_MASTERCHEF_ADDRESS;
-    if (parsed === undefined || !address) return;
+    if (parsed === undefined || !address || !masterChefAddress) return;
     const fn = withHarvest ? "withdrawAndHarvest" : "withdraw";
     const hash = await writeContractAsync({
-      address: chef,
+      address: masterChefAddress,
       abi: masterChefAbi,
       functionName: fn,
       args: [BigInt(pid), parsed, address],
@@ -269,26 +133,21 @@ export default function Home() {
     setTxHash(hash);
     setTxMsg(withHarvest ? "Withdraw + harvest submitted" : "Withdraw submitted");
     setAmount("");
-    loadPool();
+    refetchPool();
   }
 
   async function handleHarvest() {
-    const chef = TADA_MASTERCHEF_ADDRESS;
-    if (!address) return;
+    if (!address || !masterChefAddress) return;
     const hash = await writeContractAsync({
-      address: chef,
+      address: masterChefAddress,
       abi: masterChefAbi,
       functionName: "harvest",
       args: [BigInt(pid), address],
     });
     setTxHash(hash);
     setTxMsg("Harvest submitted");
-    loadPool();
+    refetchPool();
   }
-
-  const tokens = TADA_TOKENS;
-  const stakingSupported = chainId === TADA_CHAIN_ID;
-  const explorer = TADA_EXPLORER_URL;
 
   // ── render ──────────────────────────────────────────────────────────
   return (
@@ -298,7 +157,7 @@ export default function Home() {
         <div className="chips">
           <div className="net-pill-wrap">
             <span className="net-pill">
-              <span className="net-pill-name">{TADA_NETWORK_NAME}</span>
+              <span className="net-pill-name">{networkName}</span>
             </span>
           </div>
           {isConnected ? (
@@ -331,12 +190,22 @@ export default function Home() {
           <section className="card">
             {!isConnected ? (
               <p className="empty">Connect your wallet to view balances.</p>
+            ) : !chain ? (
+              <p className="empty">Switch to a supported network to view balances.</p>
             ) : (
               <>
+                {walletError && (
+                  <div className="banner banner-info">
+                    <div className="banner-text">{walletError}</div>
+                  </div>
+                )}
+                {walletLoading && nativeBalance === undefined && !walletError && (
+                  <p className="empty">Loading balances…</p>
+                )}
                 <div className="bal-block">
                   <div className="k">Native balance</div>
                   <div className="v big">
-                    {formatAmount(nativeBalance)} <small>{TADA_NATIVE_SYMBOL}</small>
+                    {formatAmount(nativeBalance)} <small>{nativeSymbol}</small>
                   </div>
                 </div>
                 <div className="token-list">
@@ -354,7 +223,9 @@ export default function Home() {
           <>
             {!stakingSupported ? (
               <div className="banner banner-info">
-                <div className="banner-text">Staking is hardwired to TADA in this starter.</div>
+                <div className="banner-text">
+                  Staking is not available on {networkName}. Switch to TADA or MVL Testnet.
+                </div>
               </div>
             ) : !isConnected ? (
               <section className="card">
@@ -362,14 +233,25 @@ export default function Home() {
               </section>
             ) : (
               <>
-                {TADA_TOKENS.length > 1 && (
+                {poolError && (
+                  <div className="banner banner-info">
+                    <div className="banner-text">{poolError}</div>
+                  </div>
+                )}
+                {poolLoading && mvlPerBlock === undefined && !poolError && (
+                  <p className="empty">Loading pool data…</p>
+                )}
+                {pools.length > 1 && (
                   <div className="pool-tabs">
-                    <button className={pid === 0 ? "active" : ""} onClick={() => setPid(0)}>
-                      Pool 0
-                    </button>
-                    <button className={pid === 1 ? "active" : ""} onClick={() => setPid(1)}>
-                      Pool 1
-                    </button>
+                    {pools.map((pool) => (
+                      <button
+                        key={pool.pid}
+                        className={pid === pool.pid ? "active" : ""}
+                        onClick={() => setPid(pool.pid)}
+                      >
+                        {pool.label}
+                      </button>
+                    ))}
                   </div>
                 )}
 
@@ -384,8 +266,8 @@ export default function Home() {
                       {pid === 1
                         ? `${apr !== null ? apr.toFixed(2) : "0.00"}%`
                         : apr !== null && windowActive
-                        ? `${apr.toFixed(2)}%`
-                        : "0.00%"}
+                          ? `${apr.toFixed(2)}%`
+                          : "0.00%"}
                     </div>
                   </div>
                   <button className="btn btn-claim" onClick={handleHarvest}>
@@ -497,7 +379,7 @@ export default function Home() {
       </main>
 
       <footer>
-        {TADA_NETWORK_NAME} · Chain {chainId}
+        {networkName} · Chain {chainId}
       </footer>
     </div>
   );
