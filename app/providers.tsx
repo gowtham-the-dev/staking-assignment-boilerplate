@@ -4,39 +4,43 @@ import { useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WagmiProvider, createConfig, http } from "wagmi";
 import { injected } from "wagmi/connectors";
-import { defineChain } from "viem";
-import {
-  TADA_CHAIN_ID,
-  TADA_EXPLORER_URL,
-  TADA_NETWORK_NAME,
-  TADA_NATIVE_SYMBOL,
-  TADA_RPC_URL,
-} from "@/lib/networks";
+import { defineChain, type Chain } from "viem";
+import { SUPPORTED_CHAINS, type ChainDefinition } from "@/lib/config";
 
-const tadaChain = defineChain({
-  id: TADA_CHAIN_ID,
-  name: TADA_NETWORK_NAME,
-  nativeCurrency: { name: TADA_NATIVE_SYMBOL, symbol: TADA_NATIVE_SYMBOL, decimals: 18 },
-  rpcUrls: { default: { http: [TADA_RPC_URL] } },
-  blockExplorers: {
-    default: {
-      name: "Explorer",
-      url: TADA_EXPLORER_URL,
+function toWagmiChain(def: ChainDefinition): Chain {
+  return defineChain({
+    id: def.id,
+    name: def.name,
+    nativeCurrency: {
+      name: def.nativeSymbol,
+      symbol: def.nativeSymbol,
+      decimals: def.nativeDecimals,
     },
-  },
-  testnet: true,
-});
+    rpcUrls: { default: { http: [def.rpcUrl] } },
+    blockExplorers: {
+      default: {
+        name: "Explorer",
+        url: def.explorerUrl,
+      },
+    },
+    testnet: true,
+  });
+}
+
+const wagmiChains = SUPPORTED_CHAINS.map(toWagmiChain) as [Chain, ...Chain[]];
+
+const transports = Object.fromEntries(
+  SUPPORTED_CHAINS.map((chain) => [chain.id, http(chain.rpcUrl)]),
+);
 
 const wagmiConfig = createConfig({
-  chains: [tadaChain] as const,
+  chains: wagmiChains,
   connectors: [injected({ target: "metaMask" })],
-  transports: {
-    [TADA_CHAIN_ID]: http(TADA_RPC_URL),
-  },
+  transports,
   ssr: true,
 });
 
-export { wagmiConfig, tadaChain };
+export { wagmiConfig, wagmiChains };
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
